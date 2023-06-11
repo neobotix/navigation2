@@ -89,6 +89,7 @@ private:
   bool store_initial_pose_ = false;
   bool initial_pose_stored_ = false;
   bool loop_counter_stop_ = true;
+  bool init_state_ = true;
   std::string loop_no_ = "0";
   std::string base_frame_;
 
@@ -108,6 +109,8 @@ private:
 
   // The (non-spinning) client node used to invoke the action client
   rclcpp::Node::SharedPtr client_node_;
+
+  rclcpp::Node::SharedPtr status_check_node_;
 
   // Timeout value when waiting for action servers to respnd
   std::chrono::milliseconds server_timeout_;

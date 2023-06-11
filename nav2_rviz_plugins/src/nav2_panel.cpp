@@ -453,6 +453,7 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   auto options = rclcpp::NodeOptions().arguments(
     {"--ros-args --remap __node:=navigation_dialog_action_client"});
   client_node_ = std::make_shared<rclcpp::Node>("_", options);
+  status_check_node_ = std::make_shared<rclcpp::Node>("rviz2_nav");
 
   client_nav_ = std::make_shared<nav2_lifecycle_manager::LifecycleManagerClient>(
     "lifecycle_manager_navigation", client_node_);
@@ -595,6 +596,8 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   QObject::connect(
     &GoalUpdater, SIGNAL(updateGoal(double,double,double,QString)),                 // NOLINT
     this, SLOT(onNewGoal(double,double,double,QString)));  // NOLINT
+
+  timer_.start(200, this);
 }
 
 Nav2Panel::~Nav2Panel()
@@ -783,7 +786,7 @@ Nav2Panel::onInitialize()
 
   // create action feedback subscribers
   navigation_feedback_sub_ =
-    node->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
+    status_check_node_->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
     "navigate_to_pose/_action/feedback",
     rclcpp::SystemDefaultsQoS(),
     [this](const nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage::SharedPtr msg) {
@@ -808,7 +811,7 @@ Nav2Panel::onInitialize()
       }
     });
   nav_through_poses_feedback_sub_ =
-    node->create_subscription<nav2_msgs::action::NavigateThroughPoses::Impl::FeedbackMessage>(
+    status_check_node_->create_subscription<nav2_msgs::action::NavigateThroughPoses::Impl::FeedbackMessage>(
     "navigate_through_poses/_action/feedback",
     rclcpp::SystemDefaultsQoS(),
     [this](const nav2_msgs::action::NavigateThroughPoses::Impl::FeedbackMessage::SharedPtr msg) {
@@ -816,10 +819,18 @@ Nav2Panel::onInitialize()
     });
 
   // create action goal status subscribers
-  navigation_goal_status_sub_ = node->create_subscription<action_msgs::msg::GoalStatusArray>(
+  navigation_goal_status_sub_ = status_check_node_->create_subscription<action_msgs::msg::GoalStatusArray>(
     "navigate_to_pose/_action/status",
     rclcpp::SystemDefaultsQoS(),
     [this](const action_msgs::msg::GoalStatusArray::SharedPtr msg) {
+      if (init_state_ == true) {
+        if (msg->status_list.back().status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
+          msg->status_list.back().status == action_msgs::msg::GoalStatus::STATUS_EXECUTING) {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
+        } else {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+        }
+      }
       navigation_goal_status_indicator_->setText(
         getGoalStatusLabel(msg->status_list.back().status));
       // Clearing all the stored values once reaching the final goal
@@ -835,7 +846,7 @@ Nav2Panel::onInitialize()
         navigation_feedback_indicator_->setText(getNavToPoseFeedbackLabel());
       }
     });
-  nav_through_poses_goal_status_sub_ = node->create_subscription<action_msgs::msg::GoalStatusArray>(
+  nav_through_poses_goal_status_sub_ = status_check_node_->create_subscription<action_msgs::msg::GoalStatusArray>(
     "navigate_through_poses/_action/status",
     rclcpp::SystemDefaultsQoS(),
     [this](const action_msgs::msg::GoalStatusArray::SharedPtr msg) {
@@ -975,6 +986,9 @@ Nav2Panel::onNewGoal(double x, double y, double theta, QString frame)
 void
 Nav2Panel::onCancelButtonPressed()
 {
+  if (init_state_ ==  false) {
+    navigation_action_client_->async_cancel_all_goals();
+  }
   if (navigation_goal_handle_) {
     auto future_cancel = navigation_action_client_->async_cancel_goal(navigation_goal_handle_);
 
@@ -1013,7 +1027,7 @@ Nav2Panel::onCancelButtonPressed()
     }
   }
 
-  timer_.stop();
+  init_state_=false;
 }
 
 void
@@ -1118,70 +1132,79 @@ Nav2Panel::onAccumulating()
 void
 Nav2Panel::timerEvent(QTimerEvent * event)
 {
-  if (state_machine_.configuration().contains(accumulated_wp_)) {
-    if (event->timerId() == timer_.timerId()) {
-      if (!waypoint_follower_goal_handle_) {
-        RCLCPP_DEBUG(client_node_->get_logger(), "Waiting for Goal");
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-        return;
-      }
-
-      rclcpp::spin_some(client_node_);
-      auto status = waypoint_follower_goal_handle_->get_status();
-
-      // Check if the goal is still executing
-      if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
-        status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
-      {
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
-      } else {
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-        timer_.stop();
-      }
-    }
-  } else if (state_machine_.configuration().contains(accumulated_nav_through_poses_)) {
-    if (event->timerId() == timer_.timerId()) {
-      if (!nav_through_poses_goal_handle_) {
-        RCLCPP_DEBUG(client_node_->get_logger(), "Waiting for Goal");
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-        return;
-      }
-
-      rclcpp::spin_some(client_node_);
-      auto status = nav_through_poses_goal_handle_->get_status();
-
-      // Check if the goal is still executing
-      if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
-        status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
-      {
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
-      } else {
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-        timer_.stop();
-      }
-    }
+  if (init_state_) {
+    rclcpp::spin_some(status_check_node_);
   } else {
-    if (event->timerId() == timer_.timerId()) {
-      if (!navigation_goal_handle_) {
-        RCLCPP_DEBUG(client_node_->get_logger(), "Waiting for Goal");
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-        return;
+    if (state_machine_.configuration().contains(accumulated_wp_)) {
+      if (event->timerId() == timer_.timerId()) {
+        if (!waypoint_follower_goal_handle_) {
+          RCLCPP_DEBUG(client_node_->get_logger(), "Waiting for Goal");
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+          return;
+        }
+
+        rclcpp::spin_some(client_node_);
+        rclcpp::spin_some(status_check_node_);
+        auto status = waypoint_follower_goal_handle_->get_status();
+
+        // Check if the goal is still executing
+        if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
+          status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+        {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
+        } else {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+          init_state_ = true;
+        }
       }
+    } else if (state_machine_.configuration().contains(accumulated_nav_through_poses_)) {
+      if (event->timerId() == timer_.timerId()) {
+        if (!nav_through_poses_goal_handle_) {
+          RCLCPP_DEBUG(client_node_->get_logger(), "Waiting for Goal");
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+          return;
+        }
 
-      rclcpp::spin_some(client_node_);
-      auto status = navigation_goal_handle_->get_status();
+        rclcpp::spin_some(client_node_);
+        rclcpp::spin_some(status_check_node_);
+        auto status = nav_through_poses_goal_handle_->get_status();
 
-      // Check if the goal is still executing
-      if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
-        status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
-      {
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
-      } else {
-        state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-        timer_.stop();
+        // Check if the goal is still executing
+        if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
+          status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+        {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
+        } else {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+          init_state_ = true;
+        }
+      }
+    } else {
+      if (event->timerId() == timer_.timerId()) {
+        if (!navigation_goal_handle_) {
+          RCLCPP_DEBUG(client_node_->get_logger(), "Waiting for Goal");
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+          return;
+        }
+
+        rclcpp::spin_some(client_node_);
+        rclcpp::spin_some(status_check_node_);
+        auto status = navigation_goal_handle_->get_status();
+
+        // Check if the goal is still executing
+        if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
+          status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+        {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
+        } else {
+          state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
+          std::cout<<"finished"<<std::endl;
+          init_state_ = true;
+        }
       }
     }
   }
+  
 }
 
 void
@@ -1239,7 +1262,6 @@ Nav2Panel::startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> p
     return;
   }
 
-  timer_.start(200, this);
 }
 
 void
@@ -1291,7 +1313,7 @@ Nav2Panel::startNavThroughPoses(std::vector<geometry_msgs::msg::PoseStamped> pos
     return;
   }
 
-  timer_.start(200, this);
+  init_state_ = false;
 }
 
 void
@@ -1337,7 +1359,7 @@ Nav2Panel::startNavigation(geometry_msgs::msg::PoseStamped pose)
     return;
   }
 
-  timer_.start(200, this);
+  init_state_ = false;
 }
 
 void
