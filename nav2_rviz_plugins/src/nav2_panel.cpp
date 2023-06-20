@@ -453,7 +453,7 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   auto options = rclcpp::NodeOptions().arguments(
     {"--ros-args --remap __node:=navigation_dialog_action_client"});
   client_node_ = std::make_shared<rclcpp::Node>("_", options);
-  status_check_node_ = std::make_shared<rclcpp::Node>("rviz2_nav");
+  status_check_node_ = std::make_shared<rclcpp::Node>("nav2_rviz_plugin");
 
   client_nav_ = std::make_shared<nav2_lifecycle_manager::LifecycleManagerClient>(
     "lifecycle_manager_navigation", client_node_);
@@ -786,7 +786,8 @@ Nav2Panel::onInitialize()
 
   // create action feedback subscribers
   navigation_feedback_sub_ =
-    status_check_node_->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
+    status_check_node_->create_subscription
+    <nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
     "navigate_to_pose/_action/feedback",
     rclcpp::SystemDefaultsQoS(),
     [this](const nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage::SharedPtr msg) {
@@ -811,7 +812,8 @@ Nav2Panel::onInitialize()
       }
     });
   nav_through_poses_feedback_sub_ =
-    status_check_node_->create_subscription<nav2_msgs::action::NavigateThroughPoses::Impl::FeedbackMessage>(
+    status_check_node_->create_subscription
+    <nav2_msgs::action::NavigateThroughPoses::Impl::FeedbackMessage>(
     "navigate_through_poses/_action/feedback",
     rclcpp::SystemDefaultsQoS(),
     [this](const nav2_msgs::action::NavigateThroughPoses::Impl::FeedbackMessage::SharedPtr msg) {
@@ -819,13 +821,15 @@ Nav2Panel::onInitialize()
     });
 
   // create action goal status subscribers
-  navigation_goal_status_sub_ = status_check_node_->create_subscription<action_msgs::msg::GoalStatusArray>(
+  navigation_goal_status_sub_ =
+    status_check_node_->create_subscription<action_msgs::msg::GoalStatusArray>(
     "navigate_to_pose/_action/status",
     rclcpp::SystemDefaultsQoS(),
     [this](const action_msgs::msg::GoalStatusArray::SharedPtr msg) {
       if (init_state_ == true) {
         if (msg->status_list.back().status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
-          msg->status_list.back().status == action_msgs::msg::GoalStatus::STATUS_EXECUTING) {
+        msg->status_list.back().status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+        {
           state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
         } else {
           state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
@@ -846,7 +850,8 @@ Nav2Panel::onInitialize()
         navigation_feedback_indicator_->setText(getNavToPoseFeedbackLabel());
       }
     });
-  nav_through_poses_goal_status_sub_ = status_check_node_->create_subscription<action_msgs::msg::GoalStatusArray>(
+  nav_through_poses_goal_status_sub_ =
+    status_check_node_->create_subscription<action_msgs::msg::GoalStatusArray>(
     "navigate_through_poses/_action/status",
     rclcpp::SystemDefaultsQoS(),
     [this](const action_msgs::msg::GoalStatusArray::SharedPtr msg) {
@@ -986,7 +991,7 @@ Nav2Panel::onNewGoal(double x, double y, double theta, QString frame)
 void
 Nav2Panel::onCancelButtonPressed()
 {
-  if (init_state_ ==  false) {
+  if (init_state_ == false) {
     navigation_action_client_->async_cancel_all_goals();
   }
   if (navigation_goal_handle_) {
@@ -1026,8 +1031,7 @@ Nav2Panel::onCancelButtonPressed()
       nav_through_poses_goal_handle_.reset();
     }
   }
-
-  init_state_=false;
+  init_state_ = true;
 }
 
 void
@@ -1198,13 +1202,11 @@ Nav2Panel::timerEvent(QTimerEvent * event)
           state_machine_.postEvent(new ROSActionQEvent(QActionState::ACTIVE));
         } else {
           state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
-          std::cout<<"finished"<<std::endl;
           init_state_ = true;
         }
       }
     }
   }
-  
 }
 
 void
@@ -1261,7 +1263,6 @@ Nav2Panel::startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> p
     RCLCPP_ERROR(client_node_->get_logger(), "Goal was rejected by server");
     return;
   }
-
 }
 
 void
