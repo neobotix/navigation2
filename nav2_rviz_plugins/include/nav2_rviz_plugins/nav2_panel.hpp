@@ -91,6 +91,8 @@ private:
   bool loop_counter_stop_ = true;
   std::string loop_no_ = "0";
   std::string base_frame_;
+  action_msgs::msg::GoalStatus status_;
+  bool start_timer_ = true;
 
   // Call to send NavigateToPose action request for goal poses
   geometry_msgs::msg::PoseStamped convert_to_msg(
@@ -131,6 +133,8 @@ private:
     navigation_goal_status_sub_;
   rclcpp::Subscription<nav2_msgs::action::NavigateThroughPoses::Impl::GoalStatusMessage>::SharedPtr
     nav_through_poses_goal_status_sub_;
+  rclcpp::Subscription<nav2_msgs::action::FollowWaypoints::Impl::GoalStatusMessage>::SharedPtr
+    follow_waypoints_status_sub_;
 
   // Tf's for initial pose
   std::shared_ptr<tf2_ros::Buffer> tf2_buffer_;
