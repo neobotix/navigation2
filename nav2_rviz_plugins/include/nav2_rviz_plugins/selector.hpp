@@ -22,6 +22,8 @@
 #include <QScrollArea>
 #include <QToolButton>
 #include <QWidget>
+#include <QLabel>
+#include <QMovie>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rviz_common/panel.hpp"
@@ -54,9 +56,15 @@ private:
   bool plugins_loaded_ = false;
 
   QBasicTimer timer_;
-  QVBoxLayout * main_layout_;
+  QHBoxLayout * main_layout_;
+  QVBoxLayout * left_layout_;
+  QVBoxLayout * right_layout_;
+
   QComboBox * controller_;
   QComboBox * planner_;
+
+  QLabel *label;
+  QMovie *movie;
 
   void setController();
   void setPlanner();
